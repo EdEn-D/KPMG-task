@@ -1,0 +1,4 @@
+azure-ai-documentintelligence
+openai
+python-dotenv
+streamlit
