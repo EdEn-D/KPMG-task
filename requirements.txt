@@ -1,5 +1,7 @@
 azure-ai-documentintelligence
 openai
+fastapi
+uvicorn
 python-dotenv
 streamlit
 scikit-learn
