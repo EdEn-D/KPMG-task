@@ -53,5 +53,5 @@ def run_app(app, title="Bot name"):
 
 if __name__ == "__main__":
     app = ChatbotApp()
-    chat_title = "Chatbot UI!!!"
+    chat_title = "HMO Chatbot"
     run_app(app, chat_title)
