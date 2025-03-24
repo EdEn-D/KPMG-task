@@ -12,12 +12,11 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
 
 class OpenAIProcessor:
     def __init__(self):
@@ -43,10 +42,9 @@ class OpenAIProcessor:
                 "hmoCardNumber": "",  # 9-digit
                 "membershipTier": "",  # זהב | כסף | ארד
             },
-            "confirmation": False
+            "confirmation": False,
         }
 
-    
     def extract_fields(self, chat_history):
         """Extract all available user information from chat history"""
         system_prompt = f"""
@@ -79,7 +77,9 @@ class OpenAIProcessor:
 
         try:
             result_json = json.loads(result_text)
-            logger.info(f"Extracted fields: {json.dumps(result_json, indent=2, ensure_ascii=False)}")
+            logger.info(
+                f"Extracted fields: {json.dumps(result_json, indent=2, ensure_ascii=False)}"
+            )
             return result_json
         except json.JSONDecodeError:
             # If there's an issue with the JSON, return the empty schema
@@ -93,7 +93,11 @@ class OpenAIProcessor:
         Does not report errors for missing required fields as this is an iterative process.
         """
         results = {"valid": True, "errors": {}}
-        validated_data = {"personalInfo": {}, "healthInsurance": {}}
+        validated_data = {
+            "personalInfo": {},
+            "healthInsurance": {},
+            "confirmation": fields_json.get("confirmation", False),
+        }
 
         # Validate personal info
         personal_info = fields_json.get("personalInfo", {})
@@ -189,7 +193,9 @@ class OpenAIProcessor:
 
         # Add validated data to results
         results["validated_data"] = validated_data
-        logger.info(f"Validation results: {json.dumps(results, indent=2, ensure_ascii=False)}")
+        logger.info(
+            f"Validation results: {json.dumps(results, indent=2, ensure_ascii=False)}"
+        )
         return results
 
     def _validate_israeli_id(self, tz_number):
@@ -237,34 +243,104 @@ class OpenAIProcessor:
         """
         Generate a response based on validation results and chat history.
         Checks if all fields are filled and confirmation is true.
-        """        
-        # Check if all required fields are filled
-        personal_info = validation_results.get("personalInfo", {})
-        health_insurance = validation_results.get("healthInsurance", {})
-        confirmation = validation_results.get("confirmation", False)
-        
-        # Check if all the required fields are filled
-        all_fields_filled = (
-            personal_info.get("firstName") and
-            personal_info.get("lastName") and
-            personal_info.get("idNumber") and
-            personal_info.get("gender") and
-            personal_info.get("age") and
-            health_insurance.get("hmoName") and
-            health_insurance.get("hmoCardNumber") and
-            health_insurance.get("membershipTier")
+        """
+        # Get validated data from validation results
+        validated_data = validation_results.get("validated_data", {})
+
+        # Check confirmation status directly from validated data
+        confirmation = validated_data.get("confirmation", False)
+
+        # Get personal and health insurance info
+        personal_info = validated_data.get("personalInfo", {})
+        health_insurance = validated_data.get("healthInsurance", {})
+
+        # Define required fields
+        personal_info_fields = ["firstName", "lastName", "idNumber", "gender", "age"]
+        health_insurance_fields = ["hmoName", "hmoCardNumber", "membershipTier"]
+
+        # Check if all required fields have values
+        all_personal_info_filled = all(
+            field in personal_info and personal_info[field]
+            for field in personal_info_fields
         )
-        
+        all_health_info_filled = all(
+            field in health_insurance and health_insurance[field]
+            for field in health_insurance_fields
+        )
+        all_fields_filled = all_personal_info_filled and all_health_info_filled
+
+        logger.info(
+            f"All fields filled: {all_fields_filled}, Confirmation: {confirmation}"
+        )
+
+        # Determine which phase to enter
         if all_fields_filled and confirmation:
-            # All fields are filled and user has confirmed, proceed to next phase
-            return self.qna_phase(validation_results, chat_history)
+            # All fields are filled and user has confirmed, proceed to QnA phase
+            logger.info("Routing to QnA phase")
+            return self.qna_phase(
+                validation_results,
+                chat_history
+            )
         else:
             # Continue collecting information
+            logger.info("Routing to information collection phase")
             return self.information_collection_phase(validation_results, chat_history)
+
+    def qna_phase(self, validation_results, chat_history, html_context=None):
+        html_content = ""
+        try:
+            if html_context and os.path.exists(html_context):
+                with open(html_context, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+        except Exception as e:
+            logger.error(f"Error loading HTML content: {e}")
+
+        # Get user information from validation results
+        user_data = validation_results["validated_data"]
+
+        # Create system prompt with user context and HTML content
+        system_prompt = f"""
+        # Role
+        You are a helpful healthcare assistant providing information to a user. You must communicate only in Hebrew or English.
         
-    
-    def qna_phase(self, validation_results, chat_history):
-        return 1
+        # User Information
+        The user has provided the following information:
+        {json.dumps(user_data, indent=2, ensure_ascii=False)}
+        
+        # Context
+        The following HTML content contains information that might be relevant to the user's questions:
+        {html_content if html_content else "No additional context provided."}
+        
+        # Task
+        - Tell the user you can help them with their questions regarding their health insurance and our services.
+        - Answer the user's questions based on their information and context provided.
+        
+        # Guidelines
+        - Respond in the same language as the user's most recent question
+        - Be concise but comprehensive
+        - If you don't know the answer, say so clearly
+        - Personalize responses using the user's information when appropriate
+        """
+
+        context = f"""
+        Below is the conversation history. Answer the user's latest question:
+
+        {chat_history}
+        """
+
+        # Call Azure OpenAI
+        response = self.client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context},
+            ],
+            temperature=0.3,  # Slightly higher temperature for more natural responses
+            model=self.deployment_name,
+        )
+
+        # Extract and return the response
+        response_text = response.choices[0].message.content
+        return response_text
 
     def information_collection_phase(self, validation_results, chat_history):
         """Generate a response based on validation results and chat history"""
@@ -272,7 +348,7 @@ class OpenAIProcessor:
 
         system_prompt = f"""
         # Role
-        You are an service agent that is tasked with collecting user information by chating with them, and asking them for information. You must communicate only in Hebrew or English.
+        You are an HMO service agent that is tasked with collecting user information by chating with them, and asking them for information. You must communicate only in Hebrew or English.
 
         # Task
         Collect the following user information:
@@ -316,5 +392,3 @@ class OpenAIProcessor:
         response_text = response.choices[0].message.content
 
         return response_text
-
-

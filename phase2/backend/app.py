@@ -38,6 +38,7 @@ class ChatbotApp:
             extracted_fields = self.processor.extract_fields(chat_history)
             validation_fields = self.processor.validate_fields(extracted_fields)
             response = self.processor.generate_response(validation_fields, chat_history)
+            self.logger.info(f"Generated response: {response}")
             return {"response": response}
 
     def run(self, **kwargs):
