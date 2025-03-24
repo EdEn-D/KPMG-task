@@ -1,4 +1,3 @@
-# ocr_processor.py
 import os
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient

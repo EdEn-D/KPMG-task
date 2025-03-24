@@ -1,4 +1,3 @@
-# openai_processor.py
 import os
 import json
 from openai import AzureOpenAI
