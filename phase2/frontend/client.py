@@ -1,6 +1,14 @@
 import logging
 import requests
-
+import sys
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "http://localhost:5051"

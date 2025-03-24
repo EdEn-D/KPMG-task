@@ -4,9 +4,20 @@ import json
 import re
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+import logging
+import sys
 
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class OpenAIProcessor:
     def __init__(self):
@@ -32,8 +43,10 @@ class OpenAIProcessor:
                 "hmoCardNumber": "",  # 9-digit
                 "membershipTier": "",  # זהב | כסף | ארד
             },
+            "confirmation": False
         }
 
+    
     def extract_fields(self, chat_history):
         """Extract all available user information from chat history"""
         system_prompt = f"""
@@ -43,6 +56,7 @@ class OpenAIProcessor:
         Extract the information into the following JSON schema:
         {json.dumps(self.schema_template, indent=2, ensure_ascii=False)}
 
+        Only once all the information is collected, and the user confirms, then you can set the confirmation field to True.
         Return only the JSON output."""
 
         context = f"""
@@ -65,6 +79,7 @@ class OpenAIProcessor:
 
         try:
             result_json = json.loads(result_text)
+            logger.info(f"Extracted fields: {json.dumps(result_json, indent=2, ensure_ascii=False)}")
             return result_json
         except json.JSONDecodeError:
             # If there's an issue with the JSON, return the empty schema
@@ -77,7 +92,7 @@ class OpenAIProcessor:
 
         Does not report errors for missing required fields as this is an iterative process.
         """
-        results = {"valid": True, "errors": {}, "warnings": {}}
+        results = {"valid": True, "errors": {}}
         validated_data = {"personalInfo": {}, "healthInsurance": {}}
 
         # Validate personal info
@@ -174,6 +189,7 @@ class OpenAIProcessor:
 
         # Add validated data to results
         results["validated_data"] = validated_data
+        logger.info(f"Validation results: {json.dumps(results, indent=2, ensure_ascii=False)}")
         return results
 
     def _validate_israeli_id(self, tz_number):
@@ -218,11 +234,37 @@ class OpenAIProcessor:
         return gender.lower() in [g.lower() for g in valid_genders]
 
     def generate_response(self, validation_results, chat_history):
-        # Detarmine 
-        pass
-
+        """
+        Generate a response based on validation results and chat history.
+        Checks if all fields are filled and confirmation is true.
+        """        
+        # Check if all required fields are filled
+        personal_info = validation_results.get("personalInfo", {})
+        health_insurance = validation_results.get("healthInsurance", {})
+        confirmation = validation_results.get("confirmation", False)
+        
+        # Check if all the required fields are filled
+        all_fields_filled = (
+            personal_info.get("firstName") and
+            personal_info.get("lastName") and
+            personal_info.get("idNumber") and
+            personal_info.get("gender") and
+            personal_info.get("age") and
+            health_insurance.get("hmoName") and
+            health_insurance.get("hmoCardNumber") and
+            health_insurance.get("membershipTier")
+        )
+        
+        if all_fields_filled and confirmation:
+            # All fields are filled and user has confirmed, proceed to next phase
+            return self.qna_phase(validation_results, chat_history)
+        else:
+            # Continue collecting information
+            return self.information_collection_phase(validation_results, chat_history)
+        
+    
     def qna_phase(self, validation_results, chat_history):
-        pass
+        return 1
 
     def information_collection_phase(self, validation_results, chat_history):
         """Generate a response based on validation results and chat history"""
@@ -242,7 +284,7 @@ class OpenAIProcessor:
             - HMO card number (9-digit)
             - Insurance membership tier (זהב | כסף | ארד)
 
-        Based on the current validated data below, consider what information has already been collected and address any errors or warnings:
+        Based on the current validated data below, consider what information has already been collected and address any errors:
         {json.dumps(validation_results, indent=2, ensure_ascii=False)}
         
         # Specifics
@@ -274,3 +316,5 @@ class OpenAIProcessor:
         response_text = response.choices[0].message.content
 
         return response_text
+
+

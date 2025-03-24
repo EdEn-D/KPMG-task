@@ -34,12 +34,10 @@ class ChatbotApp:
         
         @self.app.post("/generate_response")
         async def generate_response(chat_history: str):
-            self.logger.info(f"Received chat history: {chat_history}")
+            self.logger.info("Received chat history. Generating response...")
             extracted_fields = self.processor.extract_fields(chat_history)
             validation_fields = self.processor.validate_fields(extracted_fields)
-            response = self.processor.generate_response(
-                validation_fields, chat_history
-            )
+            response = self.processor.generate_response(validation_fields, chat_history)
             return {"response": response}
 
     def run(self, **kwargs):
