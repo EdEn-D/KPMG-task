@@ -26,9 +26,6 @@ class OpenAIProcessor:
         Returns:
             JSON object with extracted fields
         """
-        # Prepare text content from OCR result
-        content = ocr_result
-        
         # Define the output schema for the model
         output_schema = {
             "lastName": "",
@@ -93,7 +90,7 @@ class OpenAIProcessor:
         user_prompt = f"""
         Here is the OCR text from a ביטוח לאומי form:
         
-        {content}
+        {ocr_result}
         
         Extract the information into the following JSON schema:
         {json.dumps(output_schema, indent=2, ensure_ascii=False)}
@@ -107,7 +104,7 @@ class OpenAIProcessor:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.3,
+            temperature=0,
             model=self.deployment_name,
             response_format={"type": "json_object"}
         )
