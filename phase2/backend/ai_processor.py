@@ -3,11 +3,12 @@ import os
 import json
 import re
 from openai import AzureOpenAI
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import logging
 import sys
+from .rag import RAGProcessor  # Import the RAG processor
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 # Configure logging
 logging.basicConfig(
@@ -27,6 +28,10 @@ class OpenAIProcessor:
             api_version=os.environ.get("AZURE_OPENAI_API_VERSION"),
         )
         self.deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+
+        self.rag = RAGProcessor()
+        # TODO: Get dir from initalizer
+        self.rag.initialize_from_directory(directory_path="data/phase2_data")
 
         # Define the schema structure (only used as a template)
         self.schema_template = {
@@ -277,28 +282,35 @@ class OpenAIProcessor:
         if all_fields_filled and confirmation:
             # All fields are filled and user has confirmed, proceed to QnA phase
             logger.info("Routing to QnA phase")
-            return self.qna_phase(
-                validation_results,
-                chat_history
-            )
+            return self.qna_phase(validation_results, chat_history)
         else:
             # Continue collecting information
             logger.info("Routing to information collection phase")
             return self.information_collection_phase(validation_results, chat_history)
 
     def qna_phase(self, validation_results, chat_history, html_context=None):
-        html_content = ""
-        try:
-            if html_context and os.path.exists(html_context):
-                with open(html_context, "r", encoding="utf-8") as f:
-                    html_content = f.read()
-        except Exception as e:
-            logger.error(f"Error loading HTML content: {e}")
+        # Extract the latest user query from the chat history
+        latest_query = ""
+        chat_lines = chat_history.split("\n")
+
+        # Iterate through the lines in reverse to find the last user message
+        for i in range(len(chat_lines) - 1, -1, -1):
+            line = chat_lines[i].strip()
+            if line.startswith("User:"):
+                latest_query = line[5:].strip()  # Remove "User: " prefix and get the query
+                break
+
+        logger.info(f"Latest query extracted: {latest_query}")
+
+        # Get relevant context from the RAG processor
+        relevant_context = self.rag.get_relevant_context(
+            latest_query, num_results=3, include_scores=True
+        )
 
         # Get user information from validation results
         user_data = validation_results["validated_data"]
 
-        # Create system prompt with user context and HTML content
+        # Create system prompt with user context and relevant documents
         system_prompt = f"""
         # Role
         You are a helpful healthcare assistant providing information to a user. You must communicate only in Hebrew or English.
@@ -308,12 +320,12 @@ class OpenAIProcessor:
         {json.dumps(user_data, indent=2, ensure_ascii=False)}
         
         # Context
-        The following HTML content contains information that might be relevant to the user's questions:
-        {html_content if html_content else "No additional context provided."}
+        The following information might be relevant to the user's questions:
+        {relevant_context if relevant_context else "No additional context found."}
         
         # Task
         - Tell the user you can help them with their questions regarding their health insurance and our services.
-        - Answer the user's questions based on their information and context provided.
+        - Answer the user's questions based on their information and the relevant context provided.
         
         # Guidelines
         - Respond in the same language as the user's most recent question
